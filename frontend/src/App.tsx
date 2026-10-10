@@ -69,16 +69,47 @@ function App() {
       const data = await res.json();
       if (res.ok) {
         setStatusMsg(`Success: Order #${data.order_id}`);
-        // Add to local open orders
-        const isFilled = data.trades && data.trades.length > 0 && data.trades.reduce((acc: number, t: any) => acc + t.quantity, 0) >= Number(quantity);
-        setMyOrders(prev => [{
-          id: data.order_id,
-          symbol: SYMBOL,
-          is_buy: isBuy,
-          price: Number(price),
-          quantity: Number(quantity),
-          status: isFilled ? 'Filled' : 'Open'
-        }, ...prev]);
+        
+        setMyOrders(prev => {
+          let updatedOrders = [...prev];
+          
+          // Apply trades to existing open orders in our local state
+          if (data.trades && data.trades.length > 0) {
+            data.trades.forEach((trade: any) => {
+              updatedOrders = updatedOrders.map(o => {
+                // If one of our existing orders was the maker (the one resting on the book)
+                if (o.id === trade.maker_order_id) {
+                  const newQty = o.quantity - trade.quantity;
+                  return {
+                    ...o,
+                    quantity: newQty,
+                    status: newQty <= 0 ? 'Filled' : 'Open'
+                  };
+                }
+                return o;
+              });
+            });
+          }
+          
+          // Calculate remaining quantity for the new order we just placed
+          let remainingQty = Number(quantity);
+          if (data.trades) {
+            data.trades.forEach((t: any) => {
+              if (t.taker_order_id === data.order_id) remainingQty -= t.quantity;
+            });
+          }
+
+          updatedOrders.unshift({
+            id: data.order_id,
+            symbol: SYMBOL,
+            is_buy: isBuy,
+            price: Number(price),
+            quantity: remainingQty > 0 ? remainingQty : Number(quantity), // Keep original amount if fully filled for display purposes
+            status: remainingQty <= 0 ? 'Filled' : 'Open'
+          });
+
+          return updatedOrders;
+        });
       } else {
         setStatusMsg("Failed to place order");
       }
