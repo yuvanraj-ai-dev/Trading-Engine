@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt pybind11
 # Copy engine source and build it
 COPY engine /app/engine
 WORKDIR /app/engine
-RUN mkdir build && cd build && cmake .. && make
+RUN mkdir build && cd build && cmake -Dpybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())") .. && make
 # Find the built .so file and copy it to backend
 RUN cp build/*.so /app/
 
@@ -24,4 +24,5 @@ RUN cp build/*.so /app/
 COPY backend /app/backend
 
 WORKDIR /app
+ENV PYTHONPATH=/app
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
