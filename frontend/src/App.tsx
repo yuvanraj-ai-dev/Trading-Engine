@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Activity, Trash2, ArrowRightLeft } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Activity, Trash2 } from 'lucide-react';
+import { createChart, ISeriesApi, Time } from 'lightweight-charts';
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -25,6 +26,45 @@ function App() {
   
   const [myOrders, setMyOrders] = useState<Order[]>([]);
 
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartInstance = useRef<any>(null);
+  const lineSeries = useRef<ISeriesApi<"Line"> | null>(null);
+  const lastTime = useRef<number>(0);
+
+  // Initialize Chart
+  useEffect(() => {
+    if (chartContainerRef.current && !chartInstance.current) {
+      chartInstance.current = createChart(chartContainerRef.current, {
+        layout: { 
+          background: { type: 'solid', color: 'transparent' }, 
+          textColor: '#848e9c' 
+        },
+        grid: { 
+          vertLines: { color: '#2b3139' }, 
+          horzLines: { color: '#2b3139' } 
+        },
+        width: chartContainerRef.current.clientWidth,
+        height: chartContainerRef.current.clientHeight,
+        timeScale: {
+          timeVisible: true,
+          secondsVisible: true,
+        },
+      });
+      lineSeries.current = chartInstance.current.addLineSeries({ color: '#f3ba2f', lineWidth: 2 });
+      
+      const handleResize = () => {
+        if (chartContainerRef.current && chartInstance.current) {
+          chartInstance.current.applyOptions({ 
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight 
+          });
+        }
+      };
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }
+  }, []);
+
   useEffect(() => {
     let ws: WebSocket;
     let reconnectTimeout: ReturnType<typeof setTimeout>;
@@ -34,8 +74,25 @@ function App() {
       
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        setBids(data.bids || []);
-        setAsks(data.asks || []);
+        const newBids = data.bids || [];
+        const newAsks = data.asks || [];
+        
+        setBids(newBids);
+        setAsks(newAsks);
+
+        // Update Chart with Mid-Price
+        if (newBids.length > 0 && newAsks.length > 0 && lineSeries.current) {
+          const bestBid = newBids[0][0];
+          const bestAsk = newAsks[0][0]; // Asks are sorted ascending from backend
+          const midPrice = (bestBid + bestAsk) / 2;
+          
+          const now = Math.floor(Date.now() / 1000);
+          // lightweight-charts needs unique timestamps, so only update if second has changed
+          if (now > lastTime.current) {
+            lineSeries.current.update({ time: now as Time, value: midPrice });
+            lastTime.current = now;
+          }
+        }
       };
 
       ws.onclose = () => {
@@ -73,11 +130,9 @@ function App() {
         setMyOrders(prev => {
           let updatedOrders = [...prev];
           
-          // Apply trades to existing open orders in our local state
           if (data.trades && data.trades.length > 0) {
             data.trades.forEach((trade: any) => {
               updatedOrders = updatedOrders.map(o => {
-                // If one of our existing orders was the maker (the one resting on the book)
                 if (o.id === trade.maker_order_id) {
                   const newQty = o.quantity - trade.quantity;
                   return {
@@ -91,7 +146,6 @@ function App() {
             });
           }
           
-          // Calculate remaining quantity for the new order we just placed
           let remainingQty = Number(quantity);
           if (data.trades) {
             data.trades.forEach((t: any) => {
@@ -104,7 +158,7 @@ function App() {
             symbol: SYMBOL,
             is_buy: isBuy,
             price: Number(price),
-            quantity: remainingQty > 0 ? remainingQty : Number(quantity), // Keep original amount if fully filled for display purposes
+            quantity: remainingQty > 0 ? remainingQty : Number(quantity),
             status: remainingQty <= 0 ? 'Filled' : 'Open'
           });
 
@@ -135,7 +189,6 @@ function App() {
     }
   };
 
-  // Calculate max volume for depth visualization
   const maxBidQty = Math.max(...bids.map(b => b[1]), 1);
   const maxAskQty = Math.max(...asks.map(a => a[1]), 1);
   const spread = asks.length > 0 && bids.length > 0 ? (asks[0][0] - bids[0][0]).toFixed(2) : "0.00";
@@ -148,7 +201,6 @@ function App() {
       </header>
 
       <div className="trading-layout">
-        {/* LEFT PANEL: Order Book */}
         <div className="panel orderbook-container">
           <div className="panel-header">Order Book</div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -183,14 +235,9 @@ function App() {
           </div>
         </div>
 
-        {/* CENTER PANEL: Chart & Open Orders */}
         <div className="center-content">
-          <div className="panel chart-container">
-            <div style={{ textAlign: 'center' }}>
-              <ArrowRightLeft size={48} opacity={0.2} style={{ marginBottom: '10px' }} />
-              <h2>TradingView Chart Area</h2>
-              <p>In a production app, lightweight-charts would render here.</p>
-            </div>
+          <div className="panel chart-container" style={{ position: 'relative' }}>
+            <div ref={chartContainerRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />
           </div>
           
           <div className="panel open-orders-container">
@@ -236,7 +283,6 @@ function App() {
           </div>
         </div>
 
-        {/* RIGHT PANEL: Order Entry */}
         <div className="panel order-entry-container">
           <div className="order-tabs">
             <div className={`order-tab buy ${isBuy ? 'active' : ''}`} onClick={() => setIsBuy(true)}>Buy</div>
