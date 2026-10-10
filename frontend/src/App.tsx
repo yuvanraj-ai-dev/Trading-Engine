@@ -129,6 +129,17 @@ function App() {
       const data = await res.json();
       if (res.ok) {
         setStatusMsg(`Success: Order #${data.order_id}`);
+
+        // 🔥 Push every trade execution price to the chart immediately
+        if (data.trades && data.trades.length > 0 && lineSeries.current) {
+          data.trades.forEach((trade: any) => {
+            const now = Math.floor(Date.now() / 1000);
+            // Use a slightly incremented timestamp if same second to keep series monotonic
+            const t = now > lastTime.current ? now : lastTime.current + 1;
+            lastTime.current = t;
+            lineSeries.current!.update({ time: t as any, value: trade.price });
+          });
+        }
         
         setMyOrders(prev => {
           let updatedOrders = [...prev];
