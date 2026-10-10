@@ -32,6 +32,7 @@ public:
     // Core functions
     std::vector<Trade> addOrder(int id, const std::string& symbol, bool isBuy, double price, int quantity);
     bool cancelOrder(int id);
+    void clearBook();
     
     // Snapshots
     std::map<std::string, std::vector<std::pair<double, int>>> getSnapshot(const std::string& symbol);

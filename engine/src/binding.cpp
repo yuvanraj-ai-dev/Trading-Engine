@@ -17,5 +17,6 @@ PYBIND11_MODULE(matching_engine, m) {
         .def(py::init<>())
         .def("add_order", &OrderBook::addOrder, py::arg("id"), py::arg("symbol"), py::arg("is_buy"), py::arg("price"), py::arg("quantity"))
         .def("cancel_order", &OrderBook::cancelOrder, py::arg("id"))
+        .def("clear_book", &OrderBook::clearBook)
         .def("get_snapshot", &OrderBook::getSnapshot, py::arg("symbol"));
 }

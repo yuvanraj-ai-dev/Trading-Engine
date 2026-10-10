@@ -4,7 +4,7 @@ import random
 import threading
 import uuid
 
-API_URL = "http://localhost:8000"
+API_URL = "https://trading-engine-api-3i7j.onrender.com"
 SYMBOL = "BTCUSD"
 
 def test_add_order():

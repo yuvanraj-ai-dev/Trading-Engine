@@ -121,3 +121,9 @@ std::map<std::string, std::vector<std::pair<double, int>>> OrderBook::getSnapsho
     
     return snapshot;
 }
+
+void OrderBook::clearBook() {
+    bids.clear();
+    asks.clear();
+    orderLookup.clear();
+}

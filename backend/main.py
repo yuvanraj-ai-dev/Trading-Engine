@@ -1,9 +1,10 @@
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
 import json
 import uuid
+import os
 
 # We will import the compiled C++ matching engine here
 try:
@@ -83,6 +84,18 @@ async def get_orderbook(symbol: str):
     
     snapshot = book.get_snapshot(symbol)
     return snapshot
+
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "admin-secret-key")
+
+@app.post("/admin/clear/{symbol}")
+async def admin_clear_book(symbol: str, x_admin_key: str = Header(None)):
+    if x_admin_key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden: invalid admin key")
+    book = get_book(symbol)
+    if not book:
+        raise HTTPException(status_code=500, detail="Matching engine not available")
+    book.clear_book()
+    return {"status": "success", "message": f"Order book for {symbol} cleared"}
 
 @app.websocket("/ws/orderbook/{symbol}")
 async def websocket_orderbook(websocket: WebSocket, symbol: str):

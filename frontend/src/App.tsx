@@ -25,6 +25,9 @@ function App() {
   const [statusMsg, setStatusMsg] = useState("");
   
   const [myOrders, setMyOrders] = useState<Order[]>([]);
+  const [adminKey, setAdminKey] = useState<string>("admin-secret-key");
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [adminMsg, setAdminMsg] = useState("");
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<any>(null);
@@ -189,6 +192,25 @@ function App() {
     }
   };
 
+  const clearBook = async () => {
+    setAdminMsg("Clearing...");
+    try {
+      const res = await fetch(`${API_URL}/admin/clear/${SYMBOL}`, {
+        method: "POST",
+        headers: { "x-admin-key": adminKey }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAdminMsg("✓ Order book cleared!");
+        setMyOrders([]);
+      } else {
+        setAdminMsg(`✗ ${data.detail}`);
+      }
+    } catch (e) {
+      setAdminMsg("✗ Network error");
+    }
+  };
+
   const maxBidQty = Math.max(...bids.map(b => b[1]), 1);
   const maxAskQty = Math.max(...asks.map(a => a[1]), 1);
   const spread = asks.length > 0 && bids.length > 0 ? (asks[0][0] - bids[0][0]).toFixed(2) : "0.00";
@@ -198,7 +220,39 @@ function App() {
     <div className="app-container">
       <header className="header">
         <h1><Activity size={24} color="#f3ba2f" /> Trading Engine <span style={{ color: '#eaecef', fontSize: '1rem', marginLeft: '10px' }}>{SYMBOL}</span></h1>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button
+            onClick={() => { setShowAdminPanel(p => !p); setAdminMsg(""); }}
+            style={{ padding: '6px 14px', background: showAdminPanel ? '#f6465d' : '#2b3139', color: '#eaecef', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem' }}
+          >
+            🔐 Admin
+          </button>
+        </div>
       </header>
+
+      {/* Admin Panel */}
+      {showAdminPanel && (
+        <div style={{ background: '#181a20', borderBottom: '1px solid #2b3139', padding: '12px 20px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <span style={{ color: '#848e9c', fontSize: '0.85rem' }}>Admin Key:</span>
+          <input
+            type="password"
+            value={adminKey}
+            onChange={e => setAdminKey(e.target.value)}
+            style={{ background: '#2b3139', color: '#eaecef', border: '1px solid #444', borderRadius: '4px', padding: '6px 10px', fontSize: '0.85rem', width: '220px' }}
+          />
+          <button
+            onClick={() => {
+              if (window.confirm(`Are you sure you want to CLEAR the entire ${SYMBOL} order book? This cannot be undone.`)) {
+                clearBook();
+              }
+            }}
+            style={{ padding: '6px 16px', background: '#f6465d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' }}
+          >
+            🗑 Clear {SYMBOL} Order Book
+          </button>
+          {adminMsg && <span style={{ color: adminMsg.startsWith('✓') ? '#0ecb81' : '#f6465d', fontSize: '0.85rem' }}>{adminMsg}</span>}
+        </div>
+      )}
 
       <div className="trading-layout">
         <div className="panel orderbook-container">
