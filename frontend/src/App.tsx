@@ -1,30 +1,60 @@
 import React, { useState, useEffect } from 'react';
+import { Activity, Trash2, ArrowRightLeft } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const SYMBOL = "BTCUSD";
 
+interface Order {
+  id: number;
+  symbol: string;
+  is_buy: boolean;
+  price: number;
+  quantity: number;
+  status: 'Open' | 'Filled' | 'Cancelled';
+}
+
 function App() {
-  const [bids, setBids] = useState<any[]>([]);
-  const [asks, setAsks] = useState<any[]>([]);
+  const [bids, setBids] = useState<[number, number][]>([]);
+  const [asks, setAsks] = useState<[number, number][]>([]);
   
-  const [price, setPrice] = useState(50000);
-  const [quantity, setQuantity] = useState(1);
+  const [price, setPrice] = useState<string>("50000");
+  const [quantity, setQuantity] = useState<string>("1");
   const [isBuy, setIsBuy] = useState(true);
-  const [status, setStatus] = useState("");
+  const [statusMsg, setStatusMsg] = useState("");
+  
+  const [myOrders, setMyOrders] = useState<Order[]>([]);
 
   useEffect(() => {
-    const ws = new WebSocket(`${WS_URL}/orderbook/${SYMBOL}`);
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setBids(data.bids || []);
-      setAsks(data.asks || []);
+    let ws: WebSocket;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      ws = new WebSocket(`${WS_URL}/orderbook/${SYMBOL}`);
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        setBids(data.bids || []);
+        setAsks(data.asks || []);
+      };
+
+      ws.onclose = () => {
+        console.log("WS closed. Reconnecting...");
+        reconnectTimeout = setTimeout(connect, 3000);
+      };
     };
-    return () => ws.close();
+
+    connect();
+    
+    return () => {
+      if (ws) ws.close();
+      clearTimeout(reconnectTimeout);
+    };
   }, []);
 
   const placeOrder = async () => {
-    setStatus("Placing order...");
+    if (!price || !quantity || Number(quantity) <= 0) return;
+    setStatusMsg("Placing order...");
     try {
       const res = await fetch(`${API_URL}/orders`, {
         method: "POST",
@@ -37,64 +67,177 @@ function App() {
         })
       });
       const data = await res.json();
-      setStatus(`Success! Order ID: ${data.order_id}`);
+      if (res.ok) {
+        setStatusMsg(`Success: Order #${data.order_id}`);
+        // Add to local open orders
+        const isFilled = data.trades && data.trades.length > 0 && data.trades.reduce((acc: number, t: any) => acc + t.quantity, 0) >= Number(quantity);
+        setMyOrders(prev => [{
+          id: data.order_id,
+          symbol: SYMBOL,
+          is_buy: isBuy,
+          price: Number(price),
+          quantity: Number(quantity),
+          status: isFilled ? 'Filled' : 'Open'
+        }, ...prev]);
+      } else {
+        setStatusMsg("Failed to place order");
+      }
     } catch (e) {
-      setStatus("Error placing order");
+      setStatusMsg("Network error");
     }
   };
 
+  const cancelOrder = async (orderId: number) => {
+    try {
+      const res = await fetch(`${API_URL}/orders/${orderId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: SYMBOL })
+      });
+      if (res.ok) {
+        setMyOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'Cancelled' } : o));
+      } else {
+        alert("Order could not be cancelled (might be filled or already cancelled)");
+      }
+    } catch (e) {
+      alert("Error cancelling order");
+    }
+  };
+
+  // Calculate max volume for depth visualization
+  const maxBidQty = Math.max(...bids.map(b => b[1]), 1);
+  const maxAskQty = Math.max(...asks.map(a => a[1]), 1);
+  const spread = asks.length > 0 && bids.length > 0 ? (asks[0][0] - bids[0][0]).toFixed(2) : "0.00";
+  const currentPrice = asks.length > 0 ? asks[0][0] : 50000;
+
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
-      <h1>Trading Engine ({SYMBOL})</h1>
-      
-      <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
-        <div style={{ flex: 1, border: '1px solid #ccc', padding: '15px', borderRadius: '8px' }}>
-          <h3>Place Order</h3>
-          <div style={{ marginBottom: '10px' }}>
-            <label>Type: </label>
-            <select value={isBuy ? "buy" : "sell"} onChange={e => setIsBuy(e.target.value === "buy")}>
-              <option value="buy">Buy</option>
-              <option value="sell">Sell</option>
-            </select>
+    <div className="app-container">
+      <header className="header">
+        <h1><Activity size={24} color="#f3ba2f" /> Trading Engine <span style={{ color: '#eaecef', fontSize: '1rem', marginLeft: '10px' }}>{SYMBOL}</span></h1>
+      </header>
+
+      <div className="trading-layout">
+        {/* LEFT PANEL: Order Book */}
+        <div className="panel orderbook-container">
+          <div className="panel-header">Order Book</div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <table className="ob-table">
+              <thead><tr><th>Price (USD)</th><th>Amount (BTC)</th></tr></thead>
+              <tbody>
+                {asks.slice().reverse().map((a, i) => (
+                  <tr key={`ask-${i}`} className="ob-row" onClick={() => setPrice(a[0].toString())}>
+                    <td className="text-sell">{a[0].toFixed(2)}</td>
+                    <td>{a[1]}</td>
+                    <div className="ob-bg bg-sell" style={{ width: `${(a[1] / maxAskQty) * 100}%` }}></div>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            
+            <div className="ob-spread text-buy">
+              {currentPrice.toFixed(2)} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Spread: {spread}</span>
+            </div>
+
+            <table className="ob-table">
+              <tbody>
+                {bids.map((b, i) => (
+                  <tr key={`bid-${i}`} className="ob-row" onClick={() => setPrice(b[0].toString())}>
+                    <td className="text-buy">{b[0].toFixed(2)}</td>
+                    <td>{b[1]}</td>
+                    <div className="ob-bg bg-buy" style={{ width: `${(b[1] / maxBidQty) * 100}%` }}></div>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div style={{ marginBottom: '10px' }}>
-            <label>Price: </label>
-            <input type="number" value={price} onChange={e => setPrice(Number(e.target.value))} />
-          </div>
-          <div style={{ marginBottom: '10px' }}>
-            <label>Quantity: </label>
-            <input type="number" value={quantity} onChange={e => setQuantity(Number(e.target.value))} />
-          </div>
-          <button onClick={placeOrder} style={{ width: '100%', padding: '10px', background: isBuy ? 'green' : 'red', color: 'white', border: 'none', borderRadius: '4px' }}>
-            Submit {isBuy ? "Buy" : "Sell"}
-          </button>
-          <p>{status}</p>
         </div>
-      </div>
-      
-      <div style={{ display: 'flex', gap: '20px' }}>
-        <div style={{ flex: 1 }}>
-          <h3 style={{ color: 'green' }}>Bids</h3>
-          <table style={{ width: '100%', textAlign: 'left' }}>
-            <thead><tr><th>Price</th><th>Qty</th></tr></thead>
-            <tbody>
-              {bids.map((b, i) => (
-                <tr key={i}><td>{b[0]}</td><td>{b[1]}</td></tr>
-              ))}
-            </tbody>
-          </table>
+
+        {/* CENTER PANEL: Chart & Open Orders */}
+        <div className="center-content">
+          <div className="panel chart-container">
+            <div style={{ textAlign: 'center' }}>
+              <ArrowRightLeft size={48} opacity={0.2} style={{ marginBottom: '10px' }} />
+              <h2>TradingView Chart Area</h2>
+              <p>In a production app, lightweight-charts would render here.</p>
+            </div>
+          </div>
+          
+          <div className="panel open-orders-container">
+            <div className="panel-header">Open Orders</div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <table className="orders-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Pair</th>
+                    <th>Type</th>
+                    <th>Side</th>
+                    <th>Price</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myOrders.length === 0 ? (
+                    <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No open orders</td></tr>
+                  ) : myOrders.map((o, i) => (
+                    <tr key={i}>
+                      <td>{new Date().toLocaleTimeString()}</td>
+                      <td>{o.symbol}</td>
+                      <td>Limit</td>
+                      <td className={o.is_buy ? "text-buy" : "text-sell"}>{o.is_buy ? "Buy" : "Sell"}</td>
+                      <td>{o.price.toFixed(2)}</td>
+                      <td>{o.quantity}</td>
+                      <td>{o.status}</td>
+                      <td>
+                        {o.status === 'Open' && (
+                          <button className="cancel-btn" onClick={() => cancelOrder(o.id)}>
+                            <Trash2 size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }}/> Cancel
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        
-        <div style={{ flex: 1 }}>
-          <h3 style={{ color: 'red' }}>Asks</h3>
-          <table style={{ width: '100%', textAlign: 'left' }}>
-            <thead><tr><th>Price</th><th>Qty</th></tr></thead>
-            <tbody>
-              {asks.slice().reverse().map((a, i) => (
-                <tr key={i}><td>{a[0]}</td><td>{a[1]}</td></tr>
-              ))}
-            </tbody>
-          </table>
+
+        {/* RIGHT PANEL: Order Entry */}
+        <div className="panel order-entry-container">
+          <div className="order-tabs">
+            <div className={`order-tab buy ${isBuy ? 'active' : ''}`} onClick={() => setIsBuy(true)}>Buy</div>
+            <div className={`order-tab sell ${!isBuy ? 'active' : ''}`} onClick={() => setIsBuy(false)}>Sell</div>
+          </div>
+          
+          <div className="order-form">
+            <div className="input-group">
+              <span className="input-label">Price</span>
+              <input type="number" step="0.01" value={price} onChange={e => setPrice(e.target.value)} />
+              <span className="input-suffix">USD</span>
+            </div>
+            
+            <div className="input-group">
+              <span className="input-label">Amount</span>
+              <input type="number" value={quantity} onChange={e => setQuantity(e.target.value)} />
+              <span className="input-suffix">BTC</span>
+            </div>
+
+            <div className="input-group" style={{ backgroundColor: 'transparent' }}>
+              <span className="input-label">Total</span>
+              <input type="text" readOnly value={(Number(price) * Number(quantity)).toFixed(2)} />
+              <span className="input-suffix">USD</span>
+            </div>
+
+            <button className={`submit-btn ${isBuy ? 'buy' : 'sell'}`} onClick={placeOrder}>
+              {isBuy ? 'Buy' : 'Sell'} {SYMBOL.replace('USD', '')}
+            </button>
+            <div className="status-msg" style={{ color: statusMsg.includes('Success') ? 'var(--buy-color)' : 'var(--text-muted)' }}>
+              {statusMsg}
+            </div>
+          </div>
         </div>
       </div>
     </div>
