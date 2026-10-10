@@ -1,5 +1,7 @@
 # High-Performance Trading Engine
 
+🚀 **Live Demo:** [https://trading-engine-7vev.vercel.app/](https://trading-engine-7vev.vercel.app/)
+
 A high-performance trading matching engine built with a C++ core and a FastAPI Python wrapper, featuring a React frontend for real-time visualization.
 
 ## Architecture
